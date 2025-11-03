@@ -3,7 +3,7 @@
 extern crate alloc;
 
 use alloc::{collections::VecDeque, vec::Vec};
-use core::default::Default;
+use core::{default::Default, ptr};
 
 /// Trait for defining grouping logic for fair queuing.
 /// Groups are determined based on `is_same_group`.
@@ -16,6 +16,7 @@ pub trait FairGroup {
 pub struct FairQueue<'a, V: FairGroup> {
     groups: Vec<VecDeque<&'a V>>,
     pointer: usize,
+    len: usize,
 }
 
 impl<'a, V: FairGroup> FairQueue<'a, V> {
@@ -23,59 +24,104 @@ impl<'a, V: FairGroup> FairQueue<'a, V> {
         Self {
             groups: Vec::new(),
             pointer: 0,
+            len: 0,
         }
     }
 
     /// Inserts a new item into the queue, ensuring spatial distancing between items of the same group.
     pub fn insert(&mut self, value: &'a V) {
-        if let Some(group) = self
-            .groups
-            .iter_mut()
-            .find(|group| group.front().map_or(false, |v| v.is_same_group(value)))
-        {
+        if let Some(group) = self.groups.iter_mut().find(|group| {
+            group
+                .front()
+                .is_some_and(|v| ptr::eq(*v, value) || (*v).is_same_group(value))
+        }) {
             group.push_back(value);
         } else {
             let mut new_group = VecDeque::new();
             new_group.push_back(value);
             self.groups.push(new_group);
         }
+        self.len += 1;
     }
 
     /// Retrieves the next item in the queue (FIFO) while maintaining spatial distancing.
     #[inline(always)]
     pub fn pop(&mut self) -> Option<&'a V> {
-        for _ in 0..self.groups.len() {
-            let pointer = self.pointer;
-            // Optimistically move queue pointer to the next group
-            self.pointer = (pointer + 1) % self.groups.len();
-
-            let group = &mut self.groups[pointer];
-            let item = group.pop_front();
-
-            if item.is_some() {
-                if group.is_empty() {
-                    self.groups.remove(pointer);
-                    if pointer < self.groups.len() {
-                        self.pointer = pointer;
-                    } else {
-                        self.pointer = 0;
-                    }
-                }
-                return item;
-            }
+        if self.len == 0 {
+            return None;
         }
 
-        None
+        loop {
+            if self.groups.is_empty() {
+                self.pointer = 0;
+                return None;
+            }
+
+            if self.pointer >= self.groups.len() {
+                self.pointer = 0;
+            }
+
+            let group = &mut self.groups[self.pointer];
+
+            if let Some(item) = group.pop_front() {
+                self.len -= 1;
+
+                if group.is_empty() {
+                    self.groups.swap_remove(self.pointer);
+                    if self.groups.is_empty() || self.pointer >= self.groups.len() {
+                        self.pointer = 0;
+                    }
+                } else if !self.groups.is_empty() {
+                    self.pointer = (self.pointer + 1) % self.groups.len();
+                }
+
+                return Some(item);
+            }
+
+            self.groups.swap_remove(self.pointer);
+            if self.groups.is_empty() {
+                self.pointer = 0;
+                return None;
+            }
+            if self.pointer >= self.groups.len() {
+                self.pointer = 0;
+            }
+        }
     }
 
     /// Peeks at the next item in the queue without removing it.
     #[inline(always)]
-    pub fn peek(&self) -> Option<&&'a V> {
+    pub fn peek(&self) -> Option<&'a V> {
         if self.groups.is_empty() {
             return None;
         }
 
-        self.groups.get(self.pointer)?.front()
+        self.groups.get(self.pointer)?.front().copied()
+    }
+
+    /// Returns the number of enqueued items.
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns true when the queue holds no items.
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Returns the number of distinct groups tracked by the queue.
+    #[inline(always)]
+    pub fn group_count(&self) -> usize {
+        self.groups.len()
+    }
+
+    /// Clears all items and resets the round-robin pointer.
+    pub fn clear(&mut self) {
+        self.groups.clear();
+        self.pointer = 0;
+        self.len = 0;
     }
 }
 
@@ -156,5 +202,60 @@ mod tests {
         assert_eq!(queue.pop(), Some(&event6));
         assert_eq!(queue.pop(), Some(&event7));
         assert_eq!(queue.pop(), None);
+    }
+
+    #[test]
+    fn test_len_and_group_count() {
+        let event = Event {
+            timestamp: 0,
+            user_id: "user1",
+        };
+        let other = Event {
+            timestamp: 1,
+            user_id: "user2",
+        };
+
+        let mut queue = FairQueue::new();
+        assert!(queue.is_empty());
+        assert_eq!(queue.len(), 0);
+        assert_eq!(queue.group_count(), 0);
+
+        queue.insert(&event);
+        assert!(!queue.is_empty());
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.group_count(), 1);
+
+        queue.insert(&other);
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.group_count(), 2);
+
+        assert_eq!(queue.pop(), Some(&event));
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.group_count(), 1);
+
+        queue.clear();
+        assert!(queue.is_empty());
+        assert_eq!(queue.group_count(), 0);
+    }
+
+    #[test]
+    fn test_peek_matches_pop() {
+        let event = Event {
+            timestamp: 1,
+            user_id: "user1",
+        };
+        let other = Event {
+            timestamp: 2,
+            user_id: "user2",
+        };
+
+        let mut queue = FairQueue::new();
+        queue.insert(&event);
+        queue.insert(&other);
+
+        assert_eq!(queue.peek(), Some(&event));
+        assert_eq!(queue.peek(), Some(&event));
+        assert_eq!(queue.pop(), Some(&event));
+        assert_eq!(queue.peek(), Some(&other));
     }
 }
