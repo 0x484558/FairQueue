@@ -1,5 +1,10 @@
 # FairQueue
 
+[![CI](https://github.com/0x484558/fairqueue/actions/workflows/ci.yml/badge.svg)](https://github.com/0x484558/fairqueue/actions/workflows/ci.yml)
+[![Docs](https://github.com/0x484558/fairqueue/actions/workflows/docs.yml/badge.svg)](https://github.com/0x484558/fairqueue/actions/workflows/docs.yml)
+[![Benchmarks](https://github.com/0x484558/fairqueue/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/0x484558/fairqueue/actions/workflows/benchmarks.yml)
+[![Security Audit](https://github.com/0x484558/fairqueue/actions/workflows/audit.yml/badge.svg)](https://github.com/0x484558/fairqueue/actions/workflows/audit.yml)
+
 FairQueue is a Rust `no_std` (`alloc`) library that implements a fair queue through spatial distancing of similar values. The data structure presented in `fairqueue` crate ensures that groups of items are equitably interleaved with items from other groups and can be scheduled in a round-robin manner.
 
 ## Usage
@@ -43,7 +48,7 @@ fn main() {
 
 - `pop(&mut self) -> Option<&V>` - Removes and returns the next item in the queue, adhering to round-robin scheduling.
 
-- `peek(&self) -> Option<&&V>` - Returns a reference to the next item in the queue without removing it.
+- `peek(&self) -> Option<&V>` - Returns a reference to the next item in the queue without removing it.
 
 ## License
 
