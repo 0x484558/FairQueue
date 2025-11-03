@@ -31,7 +31,7 @@ jobs:
             rust: stable
             check_extras: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
@@ -83,7 +83,7 @@ jobs:
     name: Minimal Versions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
