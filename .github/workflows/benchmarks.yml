@@ -1,0 +1,70 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "benches/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/benchmarks.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "benches/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/benchmarks.yml"
+  schedule:
+    - cron: "30 1 * * 1"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CRITERION_THRESHOLD: "5"
+
+jobs:
+  criterion:
+    name: Run Criterion Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install critcmp
+        run: cargo install critcmp
+
+      - name: Run benchmarks
+        run: cargo bench --bench fairqueue -- --save-baseline=current
+
+      - name: Export Criterion baseline
+        run: critcmp --export current > target/criterion/current.json
+
+      - name: Compare against main baseline
+        run: |
+          mkdir -p benchmark-artifacts
+          set -o pipefail
+          python3 scripts/compare_benchmarks.py benches/baselines/main.json target/criterion/current.json ${{ env.CRITERION_THRESHOLD }} | tee benchmark-artifacts/comparison.txt
+
+      - name: Prepare benchmark artifacts
+        if: always()
+        run: |
+          mkdir -p benchmark-artifacts
+          if [ -f target/criterion/current.json ]; then
+            cp target/criterion/current.json benchmark-artifacts/current.json
+          fi
+          cp benches/baselines/main.json benchmark-artifacts/baseline_main.json
+          if [ -d target/criterion ]; then
+            tar czf benchmark-artifacts/criterion.tar.gz -C target criterion
+          fi
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: criterion-results-${{ github.run_id }}
+          path: benchmark-artifacts

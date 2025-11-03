@@ -13,6 +13,48 @@ pub trait FairGroup {
 
 /// Spatially distancing fair queue. First in, first out, ensuring that
 /// each group of similar values is placed as far apart as possible.
+///
+/// ```
+/// use fairqueue::{FairGroup, FairQueue};
+///
+/// #[derive(Debug, PartialEq)]
+/// struct Event {
+///     user_id: &'static str,
+///     value: u32,
+/// }
+///
+/// impl FairGroup for Event {
+///     fn is_same_group(&self, other: &Self) -> bool {
+///         self.user_id == other.user_id
+///     }
+/// }
+///
+/// let user_a_first = Event {
+///     user_id: "alice",
+///     value: 1,
+/// };
+/// let user_b = Event {
+///     user_id: "bob",
+///     value: 10,
+/// };
+/// let user_a_second = Event {
+///     user_id: "alice",
+///     value: 2,
+/// };
+///
+/// let mut queue = FairQueue::new();
+/// queue.insert(&user_a_first);
+/// queue.insert(&user_a_second);
+/// queue.insert(&user_b);
+///
+/// assert_eq!(queue.len(), 3);
+/// assert_eq!(queue.group_count(), 2);
+/// assert_eq!(queue.pop(), Some(&user_a_first));
+/// assert_eq!(queue.peek(), Some(&user_b));
+/// assert_eq!(queue.pop(), Some(&user_b));
+/// assert_eq!(queue.pop(), Some(&user_a_second));
+/// assert!(queue.pop().is_none());
+/// ```
 pub struct FairQueue<'a, V: FairGroup> {
     groups: Vec<VecDeque<&'a V>>,
     pointer: usize,

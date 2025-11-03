@@ -1,6 +1,6 @@
 [package]
 name = "fairqueue"
-version = "0.1.0"
+version = "0.1.2"
 authors = ["0x484558 <root@0x484558.dev>"]
 license = "0BSD"
 description = "Spatially distancing fair queue. A kind of queue for sequential round-robin processing."
