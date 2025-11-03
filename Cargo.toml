@@ -1,19 +1,12 @@
 [package]
-name = "spacedqueue"
+name = "fairqueue"
 version = "0.1.0"
 authors = ["0x484558 <root@0x484558.dev>"]
 license = "0BSD"
-description = "Spatially Distancing Queue. A fair queue for round-robin processing."
-repository = "https://github.com/0x484558/SpacedQueue"
+description = "Spatially distancing fair queue. A kind of queue for sequential round-robin processing."
+repository = "https://github.com/0x484558/FairQueue"
 edition = "2021"
 keywords = ["no_std", "queue", "data-structures", "algorithm"]
 categories = ["data-structures"]
 
 [dependencies]
-
-[dev-dependencies]
-criterion = "0.5"
-
-[[bench]]
-name = "hash_vs_tree"
-harness = false
