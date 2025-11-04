@@ -1,6 +1,6 @@
 [package]
 name = "fairqueue"
-version = "0.1.2"
+version = "0.2.0"
 authors = ["0x484558 <hex@0x484558.dev>"]
 license = "0BSD"
 description = "Spatially distancing fair queue. A kind of queue for sequential round-robin processing."
@@ -9,10 +9,15 @@ edition = "2024"
 keywords = ["no_std", "queue", "data-structures", "algorithm"]
 categories = ["data-structures"]
 
+[features]
+default = []
+std = []
+
 [dependencies]
 
 [dev-dependencies]
 criterion = "0.7"
+proptest = { version = "1.5.0", default-features = false, features = ["std"] }
 
 [[bench]]
 name = "fairqueue"

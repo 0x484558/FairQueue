@@ -4,52 +4,54 @@
 [![Docs](https://github.com/0x484558/fairqueue/actions/workflows/docs.yml/badge.svg)](https://github.com/0x484558/fairqueue/actions/workflows/docs.yml)
 [![Benchmarks](https://github.com/0x484558/fairqueue/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/0x484558/fairqueue/actions/workflows/benchmarks.yml)
 [![Security Audit](https://github.com/0x484558/fairqueue/actions/workflows/audit.yml/badge.svg)](https://github.com/0x484558/fairqueue/actions/workflows/audit.yml)
+[![Release](https://github.com/0x484558/fairqueue/actions/workflows/release.yml/badge.svg)](https://github.com/0x484558/fairqueue/actions/workflows/release.yml)
 
-FairQueue is a Rust `no_std` (`alloc`) library that implements a fair queue through spatial distancing of similar values. The data structure presented in `fairqueue` crate ensures that groups of items are equitably interleaved with items from other groups and can be scheduled in a round-robin manner.
+FairQueue is a Rust `no_std` (`alloc`) library that implements FIFO (queue) and LIFO (stack) data structures with equitable interleaving of groups of values. Such distancing allows amortized O(1) round-robin retrieval while storing values by reference and avoiding heavy moves. The optional `std` feature adds zero-cost conveniences for callers that want to collect iterator results.
 
-## Usage
+## Example
 
-```Rust
-use fairqueue::{FairQueue, FairGroup};
+```rust
+use fairqueue::{FairGroup, FairQueue, FairStack};
 
 #[derive(Debug, PartialEq)]
 struct Event {
-    timestamp: u32,
-    user_id: &'static str,
+    user: &'static str,
+    value: u32,
 }
 
 impl FairGroup for Event {
     fn is_same_group(&self, other: &Self) -> bool {
-        self.user_id == other.user_id
+        self.user == other.user
     }
 }
 
-fn main() {
-    let mut queue = FairQueue::new();
+let a1 = Event { user: "alice", value: 1 };
+let a2 = Event { user: "alice", value: 2 };
+let b1 = Event { user: "bob", value: 9 };
 
-    queue.insert(&Event { timestamp: 1, user_id: "user1" });
-    queue.insert(&Event { timestamp: 2, user_id: "user2" });
-    queue.insert(&Event { timestamp: 3, user_id: "user1" });
+let mut queue = FairQueue::new();
+queue.insert(&a1);
+queue.insert(&a2);
+queue.insert(&b1);
+assert_eq!(queue.pop(), Some(&a1));
+assert_eq!(queue.pop(), Some(&b1));
+assert_eq!(queue.pop(), Some(&a2));
 
-    assert_eq!(queue.pop(), Some(&Event { timestamp: 1, user_id: "user1" }));
-    assert_eq!(queue.pop(), Some(&Event { timestamp: 2, user_id: "user2" }));
-    assert_eq!(queue.pop(), Some(&Event { timestamp: 3, user_id: "user1" }));
-    assert_eq!(queue.pop(), None);
-}
+let mut stack = FairStack::new();
+stack.push(&a1);
+stack.push(&a2);
+stack.push(&b1);
+assert_eq!(stack.pop(), Some(&a2));
+assert_eq!(stack.pop(), Some(&b1));
+assert_eq!(stack.pop(), Some(&a1));
 ```
 
 ## API Overview
 
-### `FairQueue`
-
-- `new() -> FairQueue` - Constructs a new, empty instance of the queue.
-
-- `insert(&mut self, value: &V: FairGroup)` - Adds a value to the queue, distancing it from values within the same group.
-
-- `pop(&mut self) -> Option<&V>` - Removes and returns the next item in the queue, adhering to round-robin scheduling.
-
-- `peek(&self) -> Option<&V>` - Returns a reference to the next item in the queue without removing it.
+- `FairGroup` trait - Defines group identity for items stored in either structure. Implementers usually rely on a key field or pointer identity so that comparisons remain near zero-cost.
+- `FairQueue` - Implements FIFO queuing while keeping groups spatially separated. Core methods include `new`, `insert`, `pop`, `peek`, `len`, `is_empty`, and `group_count`. Observability stays cheap through the `group_heads` iterator, with `group_heads_vec` available when the `std` feature is enabled.
+- `FairStack` - Implements LIFO queuing with the same fairness guarantees. The API mirrors the queue with `new`, `push`, `pop`, `peek`, `peek_group`, `len`, `is_empty`, and `group_count`. It also exposes `group_heads` and, under the `std` feature, `group_heads_vec` for eager collection.
 
 ## License
 
-FairQueue is distributed under the [BSD Zero Clause License](LICENSE).
+Licensed under the [BSD Zero Clause License](LICENSE).

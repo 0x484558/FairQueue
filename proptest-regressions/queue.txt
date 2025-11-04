@@ -1,0 +1,2 @@
+# Seeds for failure cases proptest has generated in the past.
+cc 892841aa09751b09e05dda9d5be03aa39d39a64a27cbf22fb939566238ba29f5 # shrinks to groups = [0, 1, 1, 1]

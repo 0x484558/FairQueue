@@ -1,5 +1,5 @@
 use alloc::{vec, vec::Vec};
-use core::ptr;
+use core::{ptr, slice};
 
 use crate::FairGroup;
 
@@ -155,6 +155,22 @@ impl<'a, V: FairGroup> FairStack<'a, V> {
         self.groups.len()
     }
 
+    /// Iterates over the current top item of each group without consuming them.
+    #[inline(always)]
+    #[must_use]
+    pub fn group_heads(&self) -> StackGroupHeads<'_, 'a, V> {
+        StackGroupHeads {
+            iter: self.groups.iter(),
+        }
+    }
+
+    /// Collects group heads into a vector (requires the `std` feature).
+    #[cfg(feature = "std")]
+    #[must_use]
+    pub fn group_heads_vec(&self) -> std::vec::Vec<&'a V> {
+        self.group_heads().collect()
+    }
+
     /// Clears all items and resets the round-robin pointer.
     pub fn clear(&mut self) {
         self.groups.clear();
@@ -169,19 +185,39 @@ impl<V: FairGroup> Default for FairStack<'_, V> {
     }
 }
 
+/// Iterator over the last element of each group.
+pub struct StackGroupHeads<'stack, 'value, V: FairGroup> {
+    iter: slice::Iter<'stack, Vec<&'value V>>,
+}
+
+impl<'stack, 'value, V: FairGroup> Iterator for StackGroupHeads<'stack, 'value, V> {
+    type Item = &'value V;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        for group in &mut self.iter {
+            if let Some(item) = group.last() {
+                return Some(*item);
+            }
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[derive(Debug, PartialEq)]
     struct Event {
         timestamp: u32,
         user_id: &'static str,
+        group: usize,
     }
 
     impl FairGroup for Event {
         fn is_same_group(&self, other: &Self) -> bool {
-            self.user_id == other.user_id
+            self.group == other.group
         }
     }
 
@@ -190,18 +226,22 @@ mod tests {
         let a1 = Event {
             timestamp: 1,
             user_id: "user1",
+            group: 0,
         };
         let a2 = Event {
             timestamp: 2,
             user_id: "user1",
+            group: 0,
         };
         let b1 = Event {
             timestamp: 3,
             user_id: "user2",
+            group: 1,
         };
         let b2 = Event {
             timestamp: 4,
             user_id: "user2",
+            group: 1,
         };
 
         let mut stack = FairStack::new();
@@ -222,14 +262,17 @@ mod tests {
         let a1 = Event {
             timestamp: 1,
             user_id: "user1",
+            group: 0,
         };
         let a2 = Event {
             timestamp: 2,
             user_id: "user1",
+            group: 0,
         };
         let b1 = Event {
             timestamp: 3,
             user_id: "user2",
+            group: 1,
         };
 
         let mut stack = FairStack::new();
@@ -252,5 +295,133 @@ mod tests {
         stack.clear();
         assert!(stack.is_empty());
         assert_eq!(stack.group_count(), 0);
+    }
+
+    #[test]
+    fn test_group_heads_snapshot() {
+        let a1 = Event {
+            timestamp: 1,
+            user_id: "user1",
+            group: 0,
+        };
+        let a2 = Event {
+            timestamp: 2,
+            user_id: "user1",
+            group: 0,
+        };
+        let b1 = Event {
+            timestamp: 3,
+            user_id: "user2",
+            group: 1,
+        };
+        let c1 = Event {
+            timestamp: 4,
+            user_id: "user3",
+            group: 2,
+        };
+
+        let mut stack = FairStack::new();
+        stack.push(&a1);
+        stack.push(&a2);
+        stack.push(&b1);
+        stack.push(&c1);
+
+        let mut heads = stack.group_heads();
+        assert_eq!(heads.next(), Some(&a2));
+        assert_eq!(heads.next(), Some(&b1));
+        assert_eq!(heads.next(), Some(&c1));
+        assert_eq!(heads.next(), None);
+
+        assert_eq!(stack.peek(), Some(&a2));
+
+        #[cfg(feature = "std")]
+        {
+            let collected = stack.group_heads_vec();
+            assert_eq!(collected, vec![&a2, &b1, &c1]);
+        }
+    }
+
+    #[test]
+    fn test_pointer_wraps_after_group_removal() {
+        let a1 = Event {
+            timestamp: 1,
+            user_id: "user1",
+            group: 0,
+        };
+        let b1 = Event {
+            timestamp: 2,
+            user_id: "user2",
+            group: 1,
+        };
+        let c1 = Event {
+            timestamp: 3,
+            user_id: "user3",
+            group: 2,
+        };
+        let d1 = Event {
+            timestamp: 4,
+            user_id: "user4",
+            group: 3,
+        };
+
+        let mut stack = FairStack::new();
+        stack.push(&a1);
+        stack.push(&b1);
+        stack.push(&c1);
+
+        assert_eq!(stack.pop(), Some(&a1));
+
+        stack.push(&d1);
+        let mut groups = Vec::new();
+        while let Some(item) = stack.pop() {
+            groups.push(item.group);
+        }
+
+        groups.sort_unstable();
+        assert_eq!(groups, vec![1, 2, 3]);
+        assert!(stack.is_empty());
+    }
+
+    proptest! {
+        #[test]
+        fn prop_stack_preserves_spacing(groups in proptest::collection::vec(0usize..4, 1..32)) {
+            const IDS: [&str; 4] = ["g0", "g1", "g2", "g3"];
+
+            let mut events = Vec::with_capacity(groups.len());
+            for (idx, group) in groups.iter().enumerate() {
+                events.push(Event {
+                    timestamp: idx as u32,
+                    user_id: IDS[*group],
+                    group: *group,
+                });
+            }
+
+            let mut stack = FairStack::new();
+            for event in &events {
+                stack.push(event);
+            }
+
+            let mut remaining = [0usize; 4];
+            for event in &events {
+                remaining[event.group] += 1;
+            }
+
+            let mut last_group: Option<usize> = None;
+            while let Some(event) = stack.pop() {
+                let gid = event.group;
+
+                let other_pending = remaining
+                    .iter()
+                    .enumerate()
+                    .any(|(idx, &count)| idx != gid && count > 0);
+
+                if other_pending && let Some(prev) = last_group {
+                    prop_assert_ne!(prev, gid);
+                }
+
+                remaining[gid] = remaining[gid].saturating_sub(1);
+                last_group = Some(gid);
+            }
+        }
     }
 }

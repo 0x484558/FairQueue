@@ -1,5 +1,5 @@
 use alloc::{collections::VecDeque, vec::Vec};
-use core::ptr;
+use core::{ptr, slice};
 
 use crate::FairGroup;
 
@@ -145,6 +145,22 @@ impl<'a, V: FairGroup> FairQueue<'a, V> {
         self.groups.len()
     }
 
+    /// Iterates over the current head item of each group without consuming them.
+    #[inline(always)]
+    #[must_use]
+    pub fn group_heads(&self) -> QueueGroupHeads<'_, 'a, V> {
+        QueueGroupHeads {
+            iter: self.groups.iter(),
+        }
+    }
+
+    /// Collects group heads into a vector (requires the `std` feature).
+    #[cfg(feature = "std")]
+    #[must_use]
+    pub fn group_heads_vec(&self) -> std::vec::Vec<&'a V> {
+        self.group_heads().collect()
+    }
+
     /// Clears all items and resets the round-robin pointer.
     pub fn clear(&mut self) {
         self.groups.clear();
@@ -159,19 +175,39 @@ impl<V: FairGroup> Default for FairQueue<'_, V> {
     }
 }
 
+/// Iterator over the first element of each group.
+pub struct QueueGroupHeads<'queue, 'value, V: FairGroup> {
+    iter: slice::Iter<'queue, VecDeque<&'value V>>,
+}
+
+impl<'queue, 'value, V: FairGroup> Iterator for QueueGroupHeads<'queue, 'value, V> {
+    type Item = &'value V;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        for group in &mut self.iter {
+            if let Some(item) = group.front() {
+                return Some(*item);
+            }
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[derive(Debug, PartialEq)]
     struct Event {
         timestamp: u32,
         user_id: &'static str,
+        group: usize,
     }
 
     impl FairGroup for Event {
         fn is_same_group(&self, other: &Self) -> bool {
-            self.user_id == other.user_id
+            self.group == other.group
         }
     }
 
@@ -180,34 +216,42 @@ mod tests {
         let event1 = Event {
             timestamp: 1,
             user_id: "user1",
+            group: 0,
         };
         let event2 = Event {
             timestamp: 2,
             user_id: "user2",
+            group: 1,
         };
         let event3 = Event {
             timestamp: 3,
             user_id: "user1",
+            group: 0,
         };
         let event4 = Event {
             timestamp: 4,
             user_id: "user3",
+            group: 2,
         };
         let event5 = Event {
             timestamp: 5,
             user_id: "user2",
+            group: 1,
         };
         let event6 = Event {
             timestamp: 6,
             user_id: "user1",
+            group: 0,
         };
         let event7 = Event {
             timestamp: 7,
             user_id: "user1",
+            group: 0,
         };
         let event8 = Event {
             timestamp: 8,
             user_id: "user3",
+            group: 2,
         };
 
         let mut queue = FairQueue::new();
@@ -237,10 +281,12 @@ mod tests {
         let event = Event {
             timestamp: 0,
             user_id: "user1",
+            group: 0,
         };
         let other = Event {
             timestamp: 1,
             user_id: "user2",
+            group: 1,
         };
 
         let mut queue = FairQueue::new();
@@ -271,10 +317,12 @@ mod tests {
         let event = Event {
             timestamp: 1,
             user_id: "user1",
+            group: 0,
         };
         let other = Event {
             timestamp: 2,
             user_id: "user2",
+            group: 1,
         };
 
         let mut queue = FairQueue::new();
@@ -285,5 +333,134 @@ mod tests {
         assert_eq!(queue.peek(), Some(&event));
         assert_eq!(queue.pop(), Some(&event));
         assert_eq!(queue.peek(), Some(&other));
+    }
+
+    #[test]
+    fn test_group_heads_snapshot() {
+        let a1 = Event {
+            timestamp: 1,
+            user_id: "user1",
+            group: 0,
+        };
+        let b1 = Event {
+            timestamp: 2,
+            user_id: "user2",
+            group: 1,
+        };
+        let b2 = Event {
+            timestamp: 3,
+            user_id: "user2",
+            group: 1,
+        };
+        let c1 = Event {
+            timestamp: 4,
+            user_id: "user3",
+            group: 2,
+        };
+
+        let mut queue = FairQueue::new();
+        queue.insert(&a1);
+        queue.insert(&b1);
+        queue.insert(&b2);
+        queue.insert(&c1);
+
+        let mut heads = queue.group_heads();
+        assert_eq!(heads.next(), Some(&a1));
+        assert_eq!(heads.next(), Some(&b1));
+        assert_eq!(heads.next(), Some(&c1));
+        assert_eq!(heads.next(), None);
+
+        #[cfg(feature = "std")]
+        {
+            let collected = queue.group_heads_vec();
+            assert_eq!(collected, vec![&a1, &b1, &c1]);
+        }
+
+        // Ensure borrowing state not consumed.
+        assert_eq!(queue.peek(), Some(&a1));
+    }
+
+    #[test]
+    fn test_pointer_wraps_after_group_removal() {
+        let a1 = Event {
+            timestamp: 1,
+            user_id: "user1",
+            group: 0,
+        };
+        let b1 = Event {
+            timestamp: 2,
+            user_id: "user2",
+            group: 1,
+        };
+        let c1 = Event {
+            timestamp: 3,
+            user_id: "user3",
+            group: 2,
+        };
+        let d1 = Event {
+            timestamp: 4,
+            user_id: "user4",
+            group: 3,
+        };
+
+        let mut queue = FairQueue::new();
+        queue.insert(&a1);
+        queue.insert(&b1);
+        queue.insert(&c1);
+
+        assert_eq!(queue.pop(), Some(&a1));
+        queue.insert(&d1);
+
+        let mut groups = Vec::new();
+        while let Some(item) = queue.pop() {
+            groups.push(item.group);
+        }
+
+        groups.sort_unstable();
+        assert_eq!(groups, vec![1, 2, 3]);
+        assert!(queue.is_empty());
+    }
+
+    proptest! {
+        #[test]
+        fn prop_queue_preserves_spacing(groups in proptest::collection::vec(0usize..4, 1..32)) {
+            const IDS: [&str; 4] = ["g0", "g1", "g2", "g3"];
+
+            let mut events = Vec::with_capacity(groups.len());
+            for (idx, group) in groups.iter().enumerate() {
+                events.push(Event {
+                    timestamp: idx as u32,
+                    user_id: IDS[*group],
+                    group: *group,
+                });
+            }
+
+            let mut queue = FairQueue::new();
+            for event in &events {
+                queue.insert(event);
+            }
+
+            let mut remaining = [0usize; 4];
+            for event in &events {
+                remaining[event.group] += 1;
+            }
+
+            let mut last_group: Option<usize> = None;
+            while let Some(event) = queue.pop() {
+                let gid = event.group;
+
+                let other_pending = remaining
+                    .iter()
+                    .enumerate()
+                    .any(|(idx, &count)| idx != gid && count > 0);
+
+                if other_pending && let Some(prev) = last_group {
+                    prop_assert_ne!(prev, gid);
+                }
+
+                remaining[gid] = remaining[gid].saturating_sub(1);
+                last_group = Some(gid);
+            }
+        }
     }
 }
