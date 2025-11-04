@@ -39,7 +39,7 @@ jobs:
         run: cargo install critcmp
 
       - name: Run benchmarks
-        run: cargo bench --bench fairqueue -- --save-baseline=current
+        run: cargo bench --bench fairqueue -- --save-baseline current
 
       - name: Export Criterion baseline
         run: critcmp --export current > target/criterion/current.json
